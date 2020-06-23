@@ -385,9 +385,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Resource: 
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-secret"
                   - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-dbpass"
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-adpass"
                 Action:
                   - ssm:GetParameters
 
@@ -435,6 +433,13 @@ Resources:
               awslogs-group: !Ref ECSWebTaskLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: !Ref AWS::StackName
+          # Example ENV and Secret variables
+          # Environment:
+          #   - Name: EXAMPLE_ENV
+          #     Value: example_env_value
+          # Secrets:
+          #   - Name: APP_DBPASS
+          #     ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-dbpass" 
 
   ECSWebService:
     Type: AWS::ECS::Service
