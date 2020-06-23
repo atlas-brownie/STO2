@@ -1,0 +1,619 @@
+Description: Creates a Fargate-powered cluster along with GitHub integration and Code[Build/Pipeline] for build and deployment.
+
+Metadata:  
+  Version Date: 2017-03-23
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: Network
+        Parameters:
+          - VpcId
+          - PublicSubnetIds
+      - Label:
+          default: Pipeline
+        Parameters:
+          - CodeBuildComputeType
+      - Label:
+          default: ECS
+        Parameters:
+          - ECRLifecycleCount
+          - ECSWebServicePortExposed
+          - ECSWebServiceHealthCheckPath
+          - ECSWebTaskDesiredCount
+          - ECSTaskDefinitionCPU
+          - ECSTaskDefinitionMemory
+      - Label:
+          default: GitHub
+        Parameters:
+          - GitHubOwner
+          - GitHubRepo
+          - GitHubBranch
+
+Parameters:
+  VpcId:
+    Description: The VPC ID you want Fargate to deploy into
+    Type: AWS::EC2::VPC::Id
+
+  PublicSubnetIds:
+    Description: The Pubic Subnet IDs you want Fargate to deploy into
+    Type: List<AWS::EC2::Subnet::Id>
+  
+  CodeBuildComputeType:
+    Description: The type of instance used by CodeBuild
+    Type: String
+    Default: BUILD_GENERAL1_MEDIUM
+    AllowedValues:
+      - BUILD_GENERAL1_SMALL
+      - BUILD_GENERAL1_MEDIUM
+      - BUILD_GENERAL1_LARGE
+  
+  GitHubOwner:
+    Description: The Owner of the GitHub Repository (e.g. User or Organization)
+    Type: String
+  
+  GitHubRepo:
+    Description: The GitHub Repository
+    Type: String
+
+  GitHubBranch:
+    Description: The specific branch you want to monitor for new builds and deploys
+    Type: String
+
+  ECRLifecycleCount:
+    Description: The maximum number of images ECR should retain
+    Type: Number
+    Default: 20
+
+  ECSWebServicePortExposed:
+    Description: The port exposed by the Docker container
+    Type: Number
+    Default: 8080
+  
+  ECSWebServiceHealthCheckPath:
+    Description: The path to use for health checks for the Web Service
+    Type: String
+    Default: /healthcheck
+
+  ECSWebTaskDesiredCount:
+    Description: The Desired Count of running web tasks for the Web Service
+    Type: Number
+    Default: 0
+
+  ECSTaskDefinitionCPU:
+    Description: The number of CPU units for the running Task container
+    Type: Number
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    Default: 1024
+
+  ECSTaskDefinitionMemory:
+    Description: The amount of memory used for the running Task container
+    Type: String
+    AllowedValues:
+      - 1GB
+      - 2GB
+      - 4GB
+      - 6GB
+      - 8GB
+      - 10GB
+      - 12GB
+      - 14GB
+      - 16GB
+      - 18GB
+      - 20GB
+      - 22GB
+      - 24GB
+      - 26GB
+      - 28GB
+      - 30GB
+    Default: 8GB
+
+Rules:
+  SubnetsInVPC:
+    Assertions:
+      - Assert:
+          'Fn::EachMemberIn':
+            - 'Fn::ValueOfAll':
+                - 'AWS::EC2::Subnet::Id'
+                - VpcId
+            - 'Fn::RefAll': 'AWS::EC2::VPC::Id'
+        AssertDescription: All subnets must be in the VPC 
+          
+Mappings:
+  ECSTaskDefinitionMap:
+    Memory:
+      1GB: 1024
+      2GB: 2048
+      4GB: 4096
+      6GB: 6144
+      8GB: 8192
+      10GB: 10240
+      12GB: 12288
+      14GB: 14336
+      16GB: 16384
+      18GB: 18432
+      20GB: 20480
+      22GB: 22528
+      24GB: 24576
+      26GB: 26624
+      28GB: 28672
+      30GB: 30720
+
+Resources:
+# Group: S3
+  CodePipelineBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-codepipeline"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldArtificats
+            ExpirationInDays: 360
+            Status: Enabled
+
+# Group: CodeBuild
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-codebuild-role"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codebuild.amazonaws.com
+      Policies:
+        - PolicyName: CodeBuildECRAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetRepositoryPolicy
+        - PolicyName: CodeBuildS3Access
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-codepipeline/*"
+                  - !Sub "arn:aws:s3:::${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-codepipeline"
+                Action:
+                  - s3:*
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-build"
+      Description: !Sub "Build envrionment used to create the docker image for the ${AWS::StackName} project"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      SourceVersion: master
+      Source: 
+        GitCloneDepth: 1
+        Type: GITHUB
+        Location: !Sub https://github.com/${GitHubOwner}/${GitHubRepo}.git
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - echo `date` no install phase...
+            pre_build:
+              commands:
+                - echo `date` starting pre_build...
+                - ECR_IMAGE_TAG="latest"
+                - ECR_COMMIT_TAG=`echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c-8`
+                - ECR_REPOSITORY_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION_ID.amazonaws.com/$ECR_REPOSITORY_NAME"
+                - $(aws ecr get-login --no-include-email --region $AWS_REGION_ID)
+            build:
+              commands:
+                - echo `date` starting build...
+                - docker build -t $ECR_REPOSITORY_NAME:$ECR_IMAGE_TAG -t $ECR_REPOSITORY_NAME:$ECR_COMMIT_TAG .
+            post_build:
+              commands:
+                - echo `date` starting post_build...
+                - docker tag $ECR_REPOSITORY_NAME:$ECR_IMAGE_TAG $ECR_REPOSITORY_URI:$ECR_IMAGE_TAG
+                - docker tag $ECR_REPOSITORY_NAME:$ECR_COMMIT_TAG $ECR_REPOSITORY_URI:$ECR_COMMIT_TAG
+                - docker push $ECR_REPOSITORY_URI:$ECR_IMAGE_TAG
+                - docker push $ECR_REPOSITORY_URI:$ECR_COMMIT_TAG
+                - printf '[{"name":"%s","imageUri":"%s"}]' $ECR_REPOSITORY_NAME $ECR_REPOSITORY_URI:$ECR_COMMIT_TAG > imagedefinitions.json
+                - echo `date` completing post_build
+          artifacts:
+            files: imagedefinitions.json
+      Environment:
+        ComputeType: !Ref CodeBuildComputeType
+        ImagePullCredentialsType: CODEBUILD 
+        Image: aws/codebuild/docker:18.09.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_REGION_ID
+            Value: !Ref AWS::Region
+          - Name: ECR_REPOSITORY_NAME
+            Value: !Sub "${AWS::StackName}-ecr"
+      Artifacts:
+        Type: no_artifacts
+
+# Group: ECR
+  ECRRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${AWS::StackName}-ecr"
+      RepositoryPolicyText:
+        Statement: 
+          - Sid: !Sub "${AWS::StackName}-ecr-policy"
+            Effect: Allow
+            Principal: 
+              AWS: 
+                - !GetAtt CodeBuildRole.Arn
+                - !GetAtt CodePipelineRole.Arn
+              Service:
+                - codebuild.amazonaws.com
+                - codepipeline.amazonaws.com
+            Action: 
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:BatchCheckLayerAvailability
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+      LifecyclePolicy:
+        # Note: LifecyclePolicyText must be a JSON string
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "description": "Only retain the last ${ECRLifecycleCount} images",
+                "rulePriority": 1,
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${ECRLifecycleCount} 
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+# Group: ECS
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${AWS::StackName}"
+
+  ECSWebServiceAlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-alb-sg"
+      GroupDescription: !Sub "${AWS::StackName}-alb-sg"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: !Ref ECSWebServicePortExposed
+          ToPort: !Ref ECSWebServicePortExposed
+          CidrIp: 0.0.0.0/0
+  
+  ECSWebServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-web-sg"
+      GroupDescription: !Sub "${AWS::StackName}-web-sg"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ECSWebServicePortExposed
+          ToPort: !Ref ECSWebServicePortExposed
+          SourceSecurityGroupId: !Ref ECSWebServiceAlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+  
+  ECSWebServiceAlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Name: !Sub "${AWS::StackName}-alb"
+      Scheme: internet-facing
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref ECSWebServiceAlbSecurityGroup
+  
+  ECSWebServiceAlbTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: ECSWebServiceAlb
+    Properties:
+      Name: !Sub "${AWS::StackName}-web-tg"
+      Port: !Ref ECSWebServicePortExposed
+      HealthCheckPath: !Ref ECSWebServiceHealthCheckPath
+      HealthCheckPort: !Ref ECSWebServicePortExposed
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+  
+  ECSWebServiceAlbHttpListner:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ECSWebServiceAlb
+    Properties:
+      LoadBalancerArn: !Ref ECSWebServiceAlb
+      Protocol: HTTP
+      Port: 80
+      DefaultActions: 
+        - Type: forward
+          TargetGroupArn: !Ref ECSWebServiceAlbTg
+  
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-task-exec-role"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+      Policies:
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: 
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-secret"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-dbpass"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-env-app-adpass"
+                Action:
+                  - ssm:GetParameters
+
+  ECSWebTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-web-task-role"
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+  
+  ECSWebTaskLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${AWS::StackName}-web-task"
+
+  ECSWebTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: !Ref ECSTaskDefinitionCPU
+      Memory: !Ref ECSTaskDefinitionMemory
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref ECSWebTaskRole
+      Family: !Sub "${AWS::StackName}-web-task"
+      ContainerDefinitions:
+        - Name: !Sub "${AWS::StackName}-ecr"
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AWS::StackName}-ecr:latest"
+          PortMappings:
+            - ContainerPort: !Ref ECSWebServicePortExposed
+              HostPort: !Ref ECSWebServicePortExposed
+          Cpu: !Ref ECSTaskDefinitionCPU
+          MemoryReservation:
+            Fn::FindInMap:
+              - ECSTaskDefinitionMap
+              - Memory
+              - !Ref ECSTaskDefinitionMemory
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSWebTaskLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref AWS::StackName
+
+  ECSWebService:
+    Type: AWS::ECS::Service
+    DependsOn: ECSWebServiceAlbTg
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: !Sub "${AWS::StackName}-web"
+      DesiredCount: !Ref ECSWebTaskDesiredCount
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub "${AWS::StackName}-ecr"
+          ContainerPort: !Ref ECSWebServicePortExposed
+          TargetGroupArn: !Ref ECSWebServiceAlbTg
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSWebServiceSecurityGroup
+          Subnets: !Ref PublicSubnetIds
+      TaskDefinition: !Ref ECSWebTaskDefinition
+
+# Group: GitHub WebHook
+  GitHubWebHook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: '{{resolve:secretsmanager:GitHub:SecretString:OAUTH_TOKEN}}'
+      Filters:
+        - JsonPath: $.ref
+          MatchEquals: 'refs/heads/{Branch}'
+      TargetPipeline: !Ref CodePipeline
+      TargetAction: Source
+      Name: GitHubWebHook
+      TargetPipelineVersion: !GetAtt CodePipeline.Version
+      RegisterWithThirdParty: true
+
+# Group: CodePipeline
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-codepipeline-role"
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codepipeline.amazonaws.com
+      Policies:
+        # NOTE: This IAMAccess policy is crucial for CodePipeline ECS Deployment to work.
+        # Without it, CodePipeline will say it does not have ECS permissions when deploying.
+        - PolicyName: CodePipelineIAMAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - iam:PassRole
+        - PolicyName: CodePipelineECRAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetRepositoryPolicy
+        - PolicyName: CodePipelineCodeCommitAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - codecommit:CancelUploadArchive
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:UploadArchive
+        - PolicyName: CodePipelineCodeBuildAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+        - PolicyName: CodePipelineCodeDeployAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplication
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+        - PolicyName: CodePipelineECSAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - ecs:*
+        - PolicyName: CodePipelineS3Access
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-codepipeline/*"
+                  - !Sub "arn:aws:s3:::${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-codepipeline"
+                Action:
+                  - s3:*
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${AWS::StackName}-pipe"
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipelineBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              RunOrder: 1
+              ActionTypeId:
+                Version: 1
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+              OutputArtifacts:
+                - Name: AppSource
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: '{{resolve:secretsmanager:GitHub:SecretString:OAUTH_TOKEN}}'
+                PollForSourceChanges: false
+        - Name: Build
+          Actions:
+            - Name: Build
+              RunOrder: 1
+              Region: !Ref AWS::Region
+              ActionTypeId:
+                Version: 1
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: AppSource
+              OutputArtifacts:
+                - Name: AppBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              Region: !Ref AWS::Region
+              ActionTypeId:
+                Version: 1
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+              InputArtifacts:
+                - Name: AppBuild
+              Configuration:
+                ClusterName: !Ref ECSCluster
+                ServiceName: !Sub "${AWS::StackName}-web"
+                FileName: imagedefinitions.json
+
+Outputs:
+  ECSWebServiceAlbDns:
+    Description: The DNS Name of the ECS ALB
+    Value: !GetAtt ECSWebServiceAlb.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-alb-dns"
