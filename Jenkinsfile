@@ -39,17 +39,6 @@ pipeline {
           }
         }
      }
-    
-    stage('Maven JUnit Test'){
-      steps {
-        sh 'mvn test'
-      }
-      post {
-        always {
-          junit 'target/surefire-reports/*.xml'
-        }
-      }
-    }
 
     stage('Cleanup Old Docker Artifacts'){
       steps{
