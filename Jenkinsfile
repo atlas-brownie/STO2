@@ -67,15 +67,15 @@ pipeline {
       }
     }
     
-    stage('Deploy Docker Image on AWS'){
-      steps {
-        script{
-          docker.withRegistry('https://940093668739.dkr.ecr.us-east-1.amazonaws.com', 'ecr:us-east-1:tflucker-aws-credentials'){
-            docker.image('node-hello-world').push('latest')
-          }
-        }
-      }
-    }
+//    stage('Deploy Docker Image on AWS'){
+//      steps {
+//        script{
+//          docker.withRegistry('https://940093668739.dkr.ecr.us-east-1.amazonaws.com', 'ecr:us-east-1:tflucker-aws-credentials'){
+//            docker.image('node-hello-world').push('latest')
+//          }
+//        }
+//      }
+//    }
     stage('Remove unused docker image'){
       steps{
         sh "docker image prune -f"
