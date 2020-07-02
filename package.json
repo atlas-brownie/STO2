@@ -20,25 +20,3 @@
     "mocha": "^8.0.1"
   }
 }
-{
-  "name": "continuous-test-code-coverage-guide",
-  "scripts": {
-    "start": "webpack",
-    "test": "jest --coverage --coverageDirectory=output/coverage/jest"
-  },
-  ...
-  "jest": {
-    "coverageReporters": [
-      "text"
-    ],
-    "reporters": [
-      "default",
-      "jest-junit"
-    ],
-    ...
-  },
-  "jest-junit": {
-    "output": "output/coverage/junit/junit.xml",
-    "usePathForSuiteName": "true"
-  }
-}
