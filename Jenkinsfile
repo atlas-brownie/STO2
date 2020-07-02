@@ -32,9 +32,9 @@ pipeline {
     stage('Code Quality') {
       steps {
         script {
-          def scannerHome = tool 'AWSSonarQube';
+          def scannerHome = tool 'SonarQube';
           withSonarQubeEnv("SonarQubeServer") {
-            sh "${tool("AWSSonarQube")}/bin/sonar-scanner"
+            sh "${tool("SonarQube")}/bin/sonar-scanner"
             }
           }
         }
