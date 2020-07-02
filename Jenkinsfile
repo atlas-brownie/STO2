@@ -70,7 +70,7 @@ pipeline {
 //    stage('Deploy Docker Image on AWS'){
 //      steps {
 //        script{
-//          docker.withRegistry('https://940093668739.dkr.ecr.us-east-1.amazonaws.com', 'ecr:us-east-1:tflucker-aws-credentials'){
+//          docker.withRegistry('https://940093668739.dkr.ecr.us-east-1.amazonaws.com', 'ecr:us-east-1:pchong-aws-credentials'){
 //            docker.image('node-hello-world').push('latest')
 //          }
 //        }
