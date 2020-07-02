@@ -76,6 +76,7 @@ pipeline {
 //        }
 //      }
 //    }
+    
     stage('Remove unused docker image'){
       steps{
         sh "docker image prune -f"
