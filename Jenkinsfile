@@ -29,6 +29,17 @@ pipeline {
       }
     }
     
+    stage('Code Quality') {
+      steps {
+        script {
+          def scannerHome = tool 'AWSSonarQube';
+          withSonarQubeEnv("SonarQubeServer") {
+            sh "${tool("AWSSonarQube")}/bin/sonar-scanner"
+            }
+          }
+        }
+     }
+    
     stage('Maven JUnit Test'){
       steps {
         sh 'mvn test'
@@ -39,17 +50,6 @@ pipeline {
         }
       }
     }
-
-    stage('Code Quality') {
-      steps {
-        script {
-          def scannerHome = tool 'AWSSonarQube';
-          withSonarQubeEnv("SonarQubeServer") {
-            sh "${tool("AWSSonarQube")}/bin/sonar-scanner"
-                  }
-                }
-             }
-          }
 
     stage('Cleanup Old Docker Artifacts'){
       steps{
