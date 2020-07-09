@@ -10,9 +10,8 @@ pipeline {
       steps {
         sh '''
           echo "PATH = ${PATH}"
-          def tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
-          echo "tag"
-          sh 'sed -i "s/.*REACT_APP_VERSION.*/REACT_APP_VERSION=${GIT_TAG_NAME}/" .env.production'
+          echo "${TAG_NAME}"
+          sh 'sed -i "s/.*REACT_APP_VERSION.*/REACT_APP_VERSION=${TAG_NAME}/" .env.production'
         '''
       }
     }
