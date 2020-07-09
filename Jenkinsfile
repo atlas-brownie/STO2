@@ -6,8 +6,8 @@ pipeline {
   }
   
   stages {
-    def tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
     stage('Initialize') {
+      def tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
       steps {
         sh '''
           echo "PATH = ${PATH}"
