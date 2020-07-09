@@ -10,8 +10,8 @@ pipeline {
       steps {
         sh '''
           echo "PATH = ${PATH}"
-          echo "${TAG_NAME}"
-          sh 'sed -i "s/.*REACT_APP_VERSION.*/REACT_APP_VERSION=${TAG_NAME}/" .env.production'
+          echo "${GIT_TAG_NAME}"
+          sh 'sed -i "s/.*REACT_APP_VERSION.*/REACT_APP_VERSION=${GIT_TAG_NAME}/" .env.production'
         '''
       }
     }
