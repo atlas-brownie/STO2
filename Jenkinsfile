@@ -6,12 +6,13 @@ pipeline {
   }
   
   stages {
+    def tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
     stage('Initialize') {
       steps {
         sh '''
           echo "PATH = ${PATH}"
-          echo "${TAG_NAME}"
-          sed -i "s/.*REACT_APP_VERSION.*/REACT_APP_VERSION=${TAG_NAME}/" .env.production
+          echo tag
+          sed -i "s/.*REACT_APP_VERSION.*/REACT_APP_VERSION=tag/" .env.production
         '''
       }
     }
